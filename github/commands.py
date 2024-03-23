@@ -241,23 +241,28 @@ class Commands:
     @webhook.subcommand("list", aliases=["ls", "l"], help="List webhooks in this room.")
     async def webhook_list(self, evt: MessageEvent) -> None:
         hooks = self.bot.webhook_manager.get_all_for_room(evt.room_id)
-        info = "\n".join(f"* `{hook.repo}` added by "
+        info = "\n".join(f"* `{hook.repo}#{hook.label_filter}` added by "
                          f"[{hook.user_id}](https://matrix.to/#/{hook.user_id})"
                          for hook in hooks)
         await evt.reply(f"GitHub webhooks in this room:\n\n{info}")
 
     @webhook.subcommand("add", aliases=["a", "create", "c"], help="Add a webhook for this room.")
     @command.argument("repo", required=True, matches=repo_syntax, label="owner/repo")
+    @command.argument("label_filter", required=False,  label="label filter")
     @authenticated
-    async def webhook_create(self, evt: MessageEvent, repo: Tuple[str, str], client: GitHubClient
+    async def webhook_create(self, evt: MessageEvent, repo: Tuple[str, str], label_filter: str, client: GitHubClient
                              ) -> None:
         repo_name = f"{repo[0]}/{repo[1]}"
-        existing = self.bot.webhook_manager.find(repo_name, evt.room_id)
+        label_filter= f"{label_filter}"
+        self.bot.log.warning(f"Creating webhook for label {label_filter}")
+        existing = self.bot.webhook_manager.find(repo_name, evt.room_id,label_filter)
         if existing:
             await evt.reply("This room already has a webhook for that repo")
             # TODO webhook may be deleted on github side
             return
-        webhook = self.bot.webhook_manager.create(repo_name, evt.sender, evt.room_id)
+        self.bot.log.warning(f"No existing webhook found")        
+        webhook = self.bot.webhook_manager.create(repo_name, evt.sender, evt.room_id, label_filter)
+        self.bot.log.warning(f"Created {label_filter}")
         try:
             await client.create_webhook(
                 *repo, url=self.bot.webapp_url / "webhook" / str(webhook.id),
@@ -273,11 +278,12 @@ class Commands:
 
     @webhook.subcommand("remove", aliases=["delete", "rm", "del"])
     @command.argument("repo", required=True, matches=repo_syntax, label="owner/repo")
+    @command.argument("label_filter", required=False, label="Label")
     @authenticated(required=False)
-    async def webhook_remove(self, evt: MessageEvent, repo: Tuple[str, str],
+    async def webhook_remove(self, evt: MessageEvent, repo: Tuple[str, str], label_filter: str,
                              client: Optional[GitHubClient]) -> None:
         repo_name = f"{repo[0]}/{repo[1]}"
-        webhook_info = self.bot.webhook_manager.find(repo_name, evt.room_id)
+        webhook_info = self.bot.webhook_manager.find(repo_name, evt.room_id, label_filter)
         if not webhook_info:
             await evt.reply("This room does not have a webhook for that repo")
             return

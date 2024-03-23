@@ -27,20 +27,22 @@ from ..util import UUIDType
 
 
 class WebhookInfo:
-    __slots__ = ("id", "repo", "user_id", "room_id", "github_id", "_secret_key", "__initialized")
+    __slots__ = ("id", "repo", "user_id", "room_id", "label_filter", "github_id", "_secret_key", "__initialized",)
     id: UUID
     repo: str
     user_id: UserID
     room_id: RoomID
     github_id: Optional[int]
-
-    def __init__(self, id: UUID, repo: str, user_id: UserID, room_id: RoomID,
+    label_filter: str
+    
+    def __init__(self, id: UUID, repo: str, user_id: UserID, room_id: RoomID, label_filter: str,
                  github_id: Optional[int] = None, _secret_key: bytes = None) -> None:
         self.id = id
         self.repo = repo
         self.user_id = user_id
         self.room_id = room_id
         self.github_id = github_id
+        self.label_filter = label_filter
         self._secret_key = _secret_key
         self.__initialized = True
 
@@ -83,18 +85,20 @@ class WebhookManager:
                             Column("repo", String(255), nullable=False),
                             Column("user_id", String(255), nullable=False),
                             Column("room_id", String(255), nullable=False),
+                            Column("label_filter", String(255), nullable=True),
                             Column("github_id", Integer, nullable=True),
                             UniqueConstraint("repo", "room_id"))
         self._webhooks = {}
 
-    def create(self, repo: str, user_id: UserID, room_id: RoomID) -> WebhookInfo:
+    def create(self, repo: str, user_id: UserID, room_id: RoomID, label_filter: str) -> WebhookInfo:
         info = WebhookInfo(id=uuid4(),
                            repo=repo,
                            user_id=user_id,
                            room_id=room_id,
+                           label_filter=label_filter,
                            _secret_key=self._secret)
         self._db.execute(self._table.insert().values(
-            id=info.id, github_id=info.github_id, repo=repo,
+            id=info.id, github_id=info.github_id, repo=repo,label_filter=label_filter,
             user_id=info.user_id, room_id=info.room_id))
         self._webhooks[info.id] = info
         return info
@@ -141,7 +145,9 @@ class WebhookManager:
         rows = self._db.execute(self._table.select().where(self._table.c.room_id == room_id))
         return (WebhookInfo(*row, _secret_key=self._secret) for row in rows)
 
-    def find(self, repo: str, room_id: RoomID) -> Optional[WebhookInfo]:
+    def find(self, repo: str, room_id: RoomID, label: str) -> Optional[WebhookInfo]:
+        if label:
+            return self._execute_select(self._table.c.repo == repo, self._table.c.room_id == room_id, self._table.c.label_filter == label)
         return self._execute_select(self._table.c.repo == repo, self._table.c.room_id == room_id)
 
     def __delitem__(self, key: UUID) -> None:

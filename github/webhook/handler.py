@@ -83,6 +83,27 @@ class WebhookHandler:
 
     async def __call__(self, evt_type: EventType, evt: Event, delivery_id: str, info: WebhookInfo
                        ) -> None:
+        # Filter
+
+        filter_passed=True
+        if (info.label_filter):
+            filter_passed=False
+            if ("labels" in evt):
+                for l in evt.labels:
+                    if l.name==info.label_filter:
+                        filter_passed=True
+            if ("pull_request" in evt):
+                for l in evt.pull_request.labels:
+                    if l.name==info.label_filter:
+                        filter_passed=True
+
+            if ("issue" in evt):
+                for l in evt.issue.labels:
+                    if l.name==info.label_filter:
+                        filter_passed=True
+#            else:
+#                self.log.debug(f"Received ping for {evt}")
+
         if evt_type == EventType.PING:
             self.log.debug(f"Received ping for {info}: {evt.zen}")
             self.bot.webhook_manager.set_github_id(info, evt.hook_id)
@@ -130,17 +151,20 @@ class WebhookHandler:
                 evt.reaction_id, info.room_id, event_id, merge=prev_reaction is not None
             )
 
-        if PendingAggregation.timeout < 0:
-            # Aggregations are disabled
-            event_id = await self.send_message(evt_type, evt, info.room_id, {delivery_id})
-            if evt_type == EventType.PUSH and event_id:
-                self.bot.db.put_event(evt.message_id, info.room_id, event_id)
-            return
-
-        for pending in self.pending_aggregations[info.id]:
-            if pending.aggregate(evt_type, evt, delivery_id):
+        if filter_passed:
+            if PendingAggregation.timeout < 0:
+                # Aggregations are disabled
+                event_id = await self.send_message(evt_type, evt, info.room_id, {delivery_id})
+                if evt_type == EventType.PUSH and event_id:
+                    self.bot.db.put_event(evt.message_id, info.room_id, event_id)
                 return
-        asyncio.ensure_future(PendingAggregation(self, evt_type, evt, delivery_id, info).start())
+
+            for pending in self.pending_aggregations[info.id]:
+                if pending.aggregate(evt_type, evt, delivery_id):
+                    return
+            asyncio.ensure_future(PendingAggregation(self, evt_type, evt, delivery_id, info).start())
+        else:
+            self.log.debug(f"Skipping {evt.action}")
 
     async def send_message(
         self,
